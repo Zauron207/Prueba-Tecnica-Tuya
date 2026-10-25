@@ -1,0 +1,118 @@
+# Pipeline CI/CD de EJEMPLO para el dataset de telefonos (GitHub Actions).
+#
+# Lo deje fuera de .github/workflows a proposito: es como seria en el proyecto
+# real (dbt + Databricks + Terraform), aca no corre. El que si corre es
+# .github/workflows/ci.yml
+#
+#   PR a develop/main  -> lint + pruebas unitarias + build con datos de muestra
+#   merge a develop    -> deploy automatico a QA
+#   tag vX.Y.Z         -> deploy a PROD con aprobacion manual
+name: dataset-telefonos
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+    tags: ["v*.*.*"]
+
+env:
+  PYTHON_VERSION: "3.11"
+  DBT_PROFILES_DIR: ./dbt
+
+jobs:
+  # 1. lint: que falle rapido y barato antes de tocar datos
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements-dev.txt
+      - name: Python (estilo, imports, errores comunes)
+        run: ruff check . && ruff format --check .
+      - name: SQL (convenciones del equipo)
+        run: sqlfluff lint dbt/models --dialect databricks
+      - name: Secretos o datos personales en el código
+        run: gitleaks detect --no-banner
+
+  # 2. pruebas unitarias de las reglas (normalizacion, score, dedup)
+  unit-tests:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/unit --cov=telefonos --cov-fail-under=85
+
+  # 3. build completo en un esquema temporal (ci_pr_<numero>) con datos de
+  #    muestra anonimizados + pruebas de datos y contrato.
+  #    Si falla una prueba bloqueante el PR no se puede mergear.
+  integration:
+    needs: unit-tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      DBT_TARGET: ci
+      DBT_SCHEMA: ci_pr_${{ github.event.number }}
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST_DEV }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN_CI }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -r requirements-dev.txt
+      - run: dbt deps
+      - name: Cargar muestra anonimizada
+        run: dbt seed --select tag:muestra_ci
+      - name: Build + tests (solo modelos modificados y sus dependientes)
+        run: dbt build --select state:modified+ --defer --state ./prod-manifest
+      - name: Validar contrato del dataset (esquema, tipos, llaves)
+        run: python scripts/validar_contrato.py contratos/telefonos_cliente.yml
+      - name: Limpiar esquema efímero
+        if: always()
+        run: dbt run-operation drop_schema --args "{schema: ${{ env.DBT_SCHEMA }}}"
+
+  # 4. deploy a QA, automatico al mergear a develop
+  deploy-qa:
+    needs: unit-tests
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Infraestructura (tablas, permisos, jobs) como código
+        run: |
+          terraform -chdir=infra init
+          terraform -chdir=infra apply -auto-approve -var-file=env/qa.tfvars
+      - name: Desplegar job del orquestador
+        run: databricks bundle deploy --target qa
+      - name: Corrida completa sobre datos de QA
+        run: databricks bundle run telefonos_pipeline --target qa
+      - name: Validación post-despliegue (umbrales de calidad)
+        run: python scripts/smoke_test_calidad.py --env qa
+
+  # 5. deploy a PROD: solo desde un tag y con aprobacion de alguien
+  #    (regla de proteccion del environment "prod" en GitHub)
+  deploy-prod:
+    needs: unit-tests
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          terraform -chdir=infra init
+          terraform -chdir=infra apply -auto-approve -var-file=env/prod.tfvars
+      - run: databricks bundle deploy --target prod
+      - name: Validación post-despliegue
+        run: python scripts/smoke_test_calidad.py --env prod
+      - name: Rollback si la validación falla
+        if: failure()
+        run: |
+          # se vuelve a desplegar la version anterior y la tabla vuelve a la
+          # ultima version buena (time travel de Delta)
+          databricks bundle deploy --target prod --var version=${{ vars.ULTIMA_VERSION_ESTABLE }}
+          python scripts/restaurar_tabla.py --tabla gold.telefonos_cliente --a-version-estable
