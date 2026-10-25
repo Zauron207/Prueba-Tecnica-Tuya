@@ -1,0 +1,28 @@
+{
+  "success": {
+    "ejemplos/sitio/blog/post.html": [
+      "../img/logo.png"
+    ],
+    "ejemplos/sitio/index.html": [
+      "img/logo.png",
+      "img/banner.png",
+      "img/icono.svg",
+      "img/foto%20perfil.gif"
+    ],
+    "ejemplos/pagina_suelta.html": [
+      "sitio/img/logo.png"
+    ]
+  },
+  "fail": {
+    "ejemplos/sitio/blog/post.html": {
+      "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTRU7IglSMWOxQgUUbU8FkpJgIA1wWhyu-OkCyLy6NL1w&s=10": "Descarga de imágenes remotas desactivada (--sin-remotas)"
+    },
+    "ejemplos/sitio/index.html": {
+      "img/no_existe.jpg": "Archivo no encontrado: ejemplos/sitio/img/no_existe.jpg",
+      "img/no_es_imagen.png": "La extensión indica image/png, pero el contenido no corresponde a ese formato"
+    },
+    "ejemplos/pagina_suelta.html": {
+      "sitio/img/inexistente.png": "Archivo no encontrado: ejemplos/sitio/img/inexistente.png"
+    }
+  }
+}
