@@ -1,0 +1,46 @@
+# CI del repo: corre las pruebas de los ejercicios que tienen codigo en cada push y PR
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]   # la minima que dice el README y una reciente
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejercicio 1 - normalización de teléfonos
+        working-directory: ejercicio_1_dataset_telefonos
+        run: python -m unittest -v
+
+      - name: Ejercicio 3 - pruebas de rachas
+        working-directory: ejercicio_3_rachas
+        run: python -m unittest -v
+
+      - name: Ejercicio 3 - corrida completa desde el Excel
+        working-directory: ejercicio_3_rachas
+        run: |
+          python rachas.py cargar
+          python rachas.py consultar --fecha-base 2024-12-31 --n 3
+
+      - name: Ejercicio 4 - pruebas del embebedor
+        working-directory: ejercicio_4_html_base64
+        run: python -m unittest -v
+
+      # --sin-remotas para que el CI no dependa de que la imagen de internet responda
+      - name: Ejercicio 4 - corrida sobre los ejemplos
+        working-directory: ejercicio_4_html_base64
+        run: python -m html_embedder ejemplos --sin-remotas --output-dir /tmp/salida_html
