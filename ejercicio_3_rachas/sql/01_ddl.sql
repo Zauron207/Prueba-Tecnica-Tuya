@@ -1,18 +1,14 @@
--- =============================================================================
 -- 01_ddl.sql
--- Estructura de la base de datos del ejercicio de rachas (SQLite).
+-- Crea las tablas del ejercicio de rachas (SQLite).
 --
--- Organicé las tablas en capas, parecido a como se haría en un lakehouse:
---   stg_*  -> datos tal como vienen del Excel, sin validar, con la fila de origen
---             para poder rastrear cualquier registro hasta el archivo fuente.
---   ref_*  -> tablas de referencia / parametrización de negocio.
---   historia, retiros -> datos limpios, tipados, sin duplicados (los que consume
---             la consulta de rachas).
---   dq_*   -> bitácora de incidencias de calidad de datos.
+-- Las separe en capas:
+--   stg_*     ---- lo que viene del Excel tal cual, sin validar, con la fila de
+--                  origen para poder rastrear todo hasta el archivo fuenteee
+--   ref_*     ---- parametros de negocio (rangos de niveles)
+--   historia, retiros ---- datos ya limpios, son los que usa la consulta
+--   dq_incidencias    ---- log de lo que encontre en la revision de calidad
 --
--- El script es idempotente: borra y recrea todo, así que se puede correr
--- varias veces sin dejar basura de ejecuciones anteriores.
--- =============================================================================
+-- Se puede correr varias veces, siempre borra y crea de nuevo.
 
 PRAGMA foreign_keys = ON;
 
@@ -26,36 +22,30 @@ DROP TABLE IF EXISTS stg_historia;
 DROP TABLE IF EXISTS stg_retiros;
 
 
--- -----------------------------------------------------------------------------
--- Staging
--- saldo se declara NUMERIC a propósito: SQLite convierte a número lo que pueda
--- y deja como TEXT lo que no. Así después puedo detectar valores no numéricos
--- con typeof() en vez de que el cargue falle.
--- -----------------------------------------------------------------------------
+-- Staging: sin restricciones para que el cargue no se caiga por un dato malo.
+-- el saldo va como NUMERIC a proposito: SQLite convierte a numero lo que puede
+-- y lo que no (ej "abc") lo deja como texto, asi despues lo pillo con typeof().
 CREATE TABLE stg_historia (
-    fila_origen     INTEGER PRIMARY KEY,  -- número de fila en la hoja "historia"
+    fila_origen     INTEGER PRIMARY KEY,  -- fila en la hoja "historia"
     identificacion  TEXT,
     corte_mes       TEXT,
     saldo           NUMERIC
 );
 
 CREATE TABLE stg_retiros (
-    fila_origen     INTEGER PRIMARY KEY,  -- número de fila en la hoja "retiros"
+    fila_origen     INTEGER PRIMARY KEY,  -- fila en la hoja "retiros"
     identificacion  TEXT,
     fecha_retiro    TEXT
 );
 
 
--- -----------------------------------------------------------------------------
--- Referencia: niveles de deuda
--- Los rangos quedan como datos y no "quemados" en un CASE. Si negocio cambia
--- un umbral, se actualiza la tabla y la consulta no se toca.
--- Convención: limite_inferior incluido (>=), limite_superior excluido (<).
--- -----------------------------------------------------------------------------
+-- Niveles de deuda. Los deje en tabla y no en un CASE para no tener que tocar
+-- la consulta si negocio cambia un rango.
+-- limite_inferior se incluye (>=), limite_superior no (<).
 CREATE TABLE ref_niveles_deuda (
     nivel            TEXT    PRIMARY KEY,
     limite_inferior  INTEGER NOT NULL,
-    limite_superior  INTEGER,             -- NULL = sin tope
+    limite_superior  INTEGER,             -- NULL = sin tope (N4)
     CHECK (limite_superior IS NULL OR limite_superior > limite_inferior)
 );
 
@@ -67,16 +57,12 @@ INSERT INTO ref_niveles_deuda (nivel, limite_inferior, limite_superior) VALUES
     ('N4',   5000000,      NULL);
 
 
--- -----------------------------------------------------------------------------
--- Capa limpia
--- Las restricciones CHECK son una segunda línea de defensa: si algo se escapa
--- de las validaciones de 02_calidad_datos.sql, el INSERT falla en vez de
--- dejar entrar un dato malo en silencio.
--- -----------------------------------------------------------------------------
+-- Tablas limpias. Los CHECK son por si acaso: si algo malo se cuela de las
+-- validaciones, prefiero que el insert falle a que entre callado.
 CREATE TABLE historia (
     identificacion  TEXT    NOT NULL CHECK (length(identificacion) = 17),
     corte_mes       TEXT    NOT NULL
-        CHECK (corte_mes = DATE(corte_mes, 'start of month', '+1 month', '-1 day')),
+        CHECK (corte_mes = DATE(corte_mes, 'start of month', '+1 month', '-1 day')),  -- fin de mes
     saldo           NUMERIC NOT NULL CHECK (saldo >= 0),
     PRIMARY KEY (identificacion, corte_mes)
 );
@@ -87,11 +73,7 @@ CREATE TABLE retiros (
 );
 
 
--- -----------------------------------------------------------------------------
--- Bitácora de calidad de datos
--- Cada regla que se dispara deja una fila aquí con la acción tomada, para que
--- cualquier decisión sobre los datos sea auditable.
--- -----------------------------------------------------------------------------
+-- Log de calidad: una fila por cada problema encontrado y que se hizo con el.
 CREATE TABLE dq_incidencias (
     id_incidencia   INTEGER PRIMARY KEY AUTOINCREMENT,
     tabla_origen    TEXT NOT NULL,
