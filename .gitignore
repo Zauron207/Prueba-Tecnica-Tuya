@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Base generada por el ejercicio 3 (se reconstruye con: python rachas.py cargar)
+*.db
+
+# Archivos generados por el ejercicio 4
+*_base64.html
+salida/
+
+# Editor / sistema operativo
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Notas personales
+_notas/

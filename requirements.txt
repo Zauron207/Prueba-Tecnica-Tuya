@@ -1,0 +1,3 @@
+# Solo el ejercicio 3 lo necesita, para leer el Excel.
+# Los ejercicios 1 y 4 usan únicamente la librería estándar.
+openpyxl>=3.1
