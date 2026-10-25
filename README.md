@@ -1,5 +1,7 @@
 # Prueba técnica - Ingeniería de Datos Tuya
 
+**Felipe Velasquez Agudelo**
+
 Aquí está mi solución a los cuatro ejercicios de la prueba. Cada uno tiene su carpeta con un README donde explico lo que hice y por qué; este archivo es el resumen general.
 
 | # | Ejercicio | Carpeta |
